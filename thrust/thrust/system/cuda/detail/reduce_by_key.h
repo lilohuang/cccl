@@ -166,7 +166,7 @@ THRUST_RUNTIME_FUNCTION ::cuda::std::pair<KeysOutputIt, ValuesOutputIt> reduce_b
 {
   using size_type = thrust::detail::it_difference_t<KeysInputIt>;
 
-  size_type num_items = static_cast<size_type>(::cuda::std::distance(keys_first, keys_last));
+  size_type num_items = ::cuda::std::distance(keys_first, keys_last);
   ::cuda::std::pair<KeysOutputIt, ValuesOutputIt> result_end{};
   cudaError_t status        = cudaSuccess;
   size_t temp_storage_bytes = 0;

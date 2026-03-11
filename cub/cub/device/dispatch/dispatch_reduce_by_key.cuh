@@ -396,6 +396,8 @@ struct DispatchReduceByKey
       // Single-tile fast path: skip init kernel and tile state when all items fit in one tile.
       // AgentReduceByKey already handles tile_idx==0 with IS_LAST_TILE==true without using
       // the tile state (no decoupled lookback needed for a single tile).
+      // Note: num_items > 0 is required because this path skips the init kernel that would
+      // otherwise set d_num_runs_out to 0 for empty inputs.
       if (num_items > 0 && num_items <= tile_size)
       {
         const auto single_vsmem_size = static_cast<size_t>(vsmem_helper_t::vsmem_per_block);
@@ -415,7 +417,8 @@ struct DispatchReduceByKey
           break;
         }
 
-        // Default-constructed tile state (internal pointers are null, but never accessed for single tile)
+        // Default-constructed tile state: internal pointers are null but never dereferenced because
+        // ConsumeTile with tile_idx==0 and IS_LAST_TILE==true skips all decoupled lookback operations
         ScanTileStateT tile_state;
 
 #ifdef CUB_DEBUG_LOG
@@ -808,6 +811,8 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch(
     // Single-tile fast path: skip init kernel and tile state when all items fit in one tile.
     // AgentReduceByKey already handles tile_idx==0 with IS_LAST_TILE==true without using
     // the tile state (no decoupled lookback needed for a single tile).
+    // Note: num_items > 0 is required because this path skips the init kernel that would
+    // otherwise set d_num_runs_out to 0 for empty inputs.
     if (num_items > 0 && num_items <= tile_size)
     {
       const auto single_vsmem_size = static_cast<size_t>(vsmem_per_block);
@@ -827,7 +832,8 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch(
         return cudaSuccess;
       }
 
-      // Default-constructed tile state (internal pointers are null, but never accessed for single tile)
+      // Default-constructed tile state: internal pointers are null but never dereferenced because
+      // ConsumeTile with tile_idx==0 and IS_LAST_TILE==true skips all decoupled lookback operations
       ScanTileStateT tile_state;
 
 #ifdef CUB_DEBUG_LOG

@@ -390,6 +390,66 @@ struct DispatchReduceByKey
     cudaError error = cudaSuccess;
     do
     {
+      // Number of input tiles
+      int tile_size = block_threads * items_per_thread;
+
+      // Single-tile fast path: skip init kernel and tile state when all items fit in one tile.
+      // AgentReduceByKey already handles tile_idx==0 with IS_LAST_TILE==true without using
+      // the tile state (no decoupled lookback needed for a single tile).
+      if (num_items > 0 && num_items <= tile_size)
+      {
+        const auto single_vsmem_size = static_cast<size_t>(vsmem_helper_t::vsmem_per_block);
+        size_t allocation_sizes[1]   = {single_vsmem_size};
+        void* allocations[1]         = {};
+
+        error = CubDebug(detail::alias_temporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes));
+        if (cudaSuccess != error)
+        {
+          break;
+        }
+
+        if (d_temp_storage == nullptr)
+        {
+          // Ensure at least 1 byte so callers allocate non-null temp storage
+          temp_storage_bytes = ::cuda::std::max(temp_storage_bytes, size_t{1});
+          break;
+        }
+
+        // Default-constructed tile state (internal pointers are null, but never accessed for single tile)
+        ScanTileStateT tile_state;
+
+#ifdef CUB_DEBUG_LOG
+        _CubLog("Invoking single-tile reduce_by_key_kernel<<<1, %d, 0, %lld>>>(), %d items per thread\n",
+                block_threads,
+                (long long) stream,
+                items_per_thread);
+#endif // CUB_DEBUG_LOG
+
+        error = CubDebug(
+          THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron(1, block_threads, 0, stream)
+            .doit(reduce_by_key_kernel,
+                  d_keys_in,
+                  d_unique_out,
+                  d_values_in,
+                  d_aggregates_out,
+                  d_num_runs_out,
+                  tile_state,
+                  0,
+                  equality_op,
+                  reduction_op,
+                  num_items,
+                  streaming_context_t{},
+                  cub::detail::vsmem_t{allocations[0]}));
+        if (cudaSuccess != error)
+        {
+          break;
+        }
+
+        // Sync the stream if specified to flush runtime errors
+        error = CubDebug(detail::DebugSyncStream(stream));
+        break;
+      }
+
       // Get device ordinal
       int device_ordinal;
       error = CubDebug(cudaGetDevice(&device_ordinal));
@@ -398,8 +458,6 @@ struct DispatchReduceByKey
         break;
       }
 
-      // Number of input tiles
-      int tile_size = block_threads * items_per_thread;
       int num_tiles = static_cast<int>(::cuda::ceil_div(num_items, tile_size));
 
       // The amount of virtual shared memory to allocate
@@ -732,6 +790,75 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch(
 
     // Number of input tiles
     const int tile_size = block_threads * items_per_thread;
+
+    auto reduce_by_key_kernel = &DeviceReduceByKeyKernel<
+      PolicySelector,
+      KeysInputIteratorT,
+      UniqueOutputIteratorT,
+      ValuesInputIteratorT,
+      AggregatesOutputIteratorT,
+      NumRunsOutputIteratorT,
+      ScanTileStateT,
+      EqualityOpT,
+      ReductionOpT,
+      OffsetT,
+      AccumT,
+      streaming_context_t>;
+
+    // Single-tile fast path: skip init kernel and tile state when all items fit in one tile.
+    // AgentReduceByKey already handles tile_idx==0 with IS_LAST_TILE==true without using
+    // the tile state (no decoupled lookback needed for a single tile).
+    if (num_items > 0 && num_items <= tile_size)
+    {
+      const auto single_vsmem_size = static_cast<size_t>(vsmem_per_block);
+      size_t allocation_sizes[1]   = {single_vsmem_size};
+      void* allocations[1]         = {};
+
+      if (const auto error =
+            CubDebug(detail::alias_temporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes)))
+      {
+        return error;
+      }
+
+      if (d_temp_storage == nullptr)
+      {
+        // Ensure at least 1 byte so callers allocate non-null temp storage
+        temp_storage_bytes = ::cuda::std::max(temp_storage_bytes, size_t{1});
+        return cudaSuccess;
+      }
+
+      // Default-constructed tile state (internal pointers are null, but never accessed for single tile)
+      ScanTileStateT tile_state;
+
+#ifdef CUB_DEBUG_LOG
+      _CubLog("Invoking single-tile reduce_by_key_kernel<<<1, %d, 0, %lld>>>(), %d items per thread\n",
+              block_threads,
+              (long long) stream,
+              items_per_thread);
+#endif
+
+      if (const auto error = CubDebug(
+            THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron(1, block_threads, 0, stream)
+              .doit(reduce_by_key_kernel,
+                    d_keys_in,
+                    d_unique_out,
+                    d_values_in,
+                    d_aggregates_out,
+                    d_num_runs_out,
+                    tile_state,
+                    0,
+                    equality_op,
+                    reduction_op,
+                    num_items,
+                    streaming_context_t{},
+                    cub::detail::vsmem_t{allocations[0]})))
+      {
+        return error;
+      }
+      return CubDebug(detail::DebugSyncStream(stream));
+    }
+
+    // Multi-tile path
     const int num_tiles = static_cast<int>(::cuda::ceil_div(num_items, tile_size));
 
     // The amount of virtual shared memory to allocate
@@ -783,20 +910,6 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch(
     {
       return cudaSuccess;
     }
-
-    auto reduce_by_key_kernel = &DeviceReduceByKeyKernel<
-      PolicySelector,
-      KeysInputIteratorT,
-      UniqueOutputIteratorT,
-      ValuesInputIteratorT,
-      AggregatesOutputIteratorT,
-      NumRunsOutputIteratorT,
-      ScanTileStateT,
-      EqualityOpT,
-      ReductionOpT,
-      OffsetT,
-      AccumT,
-      streaming_context_t>;
 
     int reduce_by_key_sm_occupancy{};
     if (const auto error = CubDebug(MaxSmOccupancy(reduce_by_key_sm_occupancy, reduce_by_key_kernel, block_threads)))

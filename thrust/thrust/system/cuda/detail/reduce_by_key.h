@@ -56,7 +56,6 @@ namespace cuda_cub
 {
 namespace detail
 {
-
 template <typename Derived,
           typename KeyInputIt,
           typename ValInputIt,
@@ -86,25 +85,20 @@ struct DispatchReduceByKey
     void* allocations[2]       = {nullptr, nullptr};
 
     // Query algorithm memory requirements
-    status = ::cub::DispatchReduceByKey<
-      KeyInputIt,
-      KeyOutputIt,
-      ValInputIt,
-      ValOutputIt,
-      OffsetT*,
-      EqualityOp,
-      ReductionOp,
-      OffsetT>::Dispatch(nullptr,
-                         allocation_sizes[0],
-                         keys_first,
-                         keys_output,
-                         values_first,
-                         values_output,
-                         static_cast<OffsetT*>(nullptr),
-                         equality_op,
-                         reduction_op,
-                         num_items,
-                         stream);
+    status = ::cub::
+      DispatchReduceByKey<KeyInputIt, KeyOutputIt, ValInputIt, ValOutputIt, OffsetT*, EqualityOp, ReductionOp, OffsetT>::
+        Dispatch(
+          nullptr,
+          allocation_sizes[0],
+          keys_first,
+          keys_output,
+          values_first,
+          values_output,
+          static_cast<OffsetT*>(nullptr),
+          equality_op,
+          reduction_op,
+          num_items,
+          stream);
     _CUDA_CUB_RET_IF_FAIL(status);
 
     status = cub::detail::alias_temporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
@@ -127,25 +121,20 @@ struct DispatchReduceByKey
     OffsetT* d_num_runs_out = thrust::detail::aligned_reinterpret_cast<OffsetT*>(allocations[1]);
 
     // Run algorithm
-    status = ::cub::DispatchReduceByKey<
-      KeyInputIt,
-      KeyOutputIt,
-      ValInputIt,
-      ValOutputIt,
-      OffsetT*,
-      EqualityOp,
-      ReductionOp,
-      OffsetT>::Dispatch(allocations[0],
-                         allocation_sizes[0],
-                         keys_first,
-                         keys_output,
-                         values_first,
-                         values_output,
-                         d_num_runs_out,
-                         equality_op,
-                         reduction_op,
-                         num_items,
-                         stream);
+    status = ::cub::
+      DispatchReduceByKey<KeyInputIt, KeyOutputIt, ValInputIt, ValOutputIt, OffsetT*, EqualityOp, ReductionOp, OffsetT>::
+        Dispatch(
+          allocations[0],
+          allocation_sizes[0],
+          keys_first,
+          keys_output,
+          values_first,
+          values_output,
+          d_num_runs_out,
+          equality_op,
+          reduction_op,
+          num_items,
+          stream);
     _CUDA_CUB_RET_IF_FAIL(status);
 
     // Get number of runs
@@ -184,11 +173,25 @@ THRUST_RUNTIME_FUNCTION ::cuda::std::pair<KeysOutputIt, ValuesOutputIt> reduce_b
 
   // 32-bit offset-type dispatch
   using dispatch32_t =
-    DispatchReduceByKey<Derived, KeysInputIt, ValuesInputIt, KeysOutputIt, ValuesOutputIt, EqualityOp, ReductionOp, std::uint32_t>;
+    DispatchReduceByKey<Derived,
+                        KeysInputIt,
+                        ValuesInputIt,
+                        KeysOutputIt,
+                        ValuesOutputIt,
+                        EqualityOp,
+                        ReductionOp,
+                        std::uint32_t>;
 
   // 64-bit offset-type dispatch
   using dispatch64_t =
-    DispatchReduceByKey<Derived, KeysInputIt, ValuesInputIt, KeysOutputIt, ValuesOutputIt, EqualityOp, ReductionOp, std::uint64_t>;
+    DispatchReduceByKey<Derived,
+                        KeysInputIt,
+                        ValuesInputIt,
+                        KeysOutputIt,
+                        ValuesOutputIt,
+                        EqualityOp,
+                        ReductionOp,
+                        std::uint64_t>;
 
   // Query temporary storage requirements
   THRUST_INDEX_TYPE_DISPATCH2(
